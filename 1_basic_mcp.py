@@ -27,6 +27,7 @@ class CustomScheduler:
         for agent in self.agents:
             agent.step()
 
+
 # ==========================================
 # STEP 2: Define Agent Classes
 # ==========================================
@@ -49,7 +50,10 @@ class PlannerAgent(BaseAgent):
                 pid, data, domain, y_true = case
                 if domain == self.disease:
                     task_id = f"task_{self.disease}_{pid}"
-                    task = {"id": pid, "description": f"Analyze {self.disease} data", "data": data, "y_true": int(y_true)}
+                    task = {"id": pid, 
+                            "description": f"Analyze {self.disease} data", 
+                            "data": data, 
+                            "y_true": int(y_true)}
                     self.model.context[task_id] = task
                     print(f"[{self.role}] Planned task {task_id}")
                 else:
@@ -125,8 +129,8 @@ class MCPMesaModel:
 
 # Diabetes
 diabetes = pd.read_csv("data/pima-indians-diabetes.data.csv",
-                       names=["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI",
-                              "DiabetesPedigreeFunction", "Age", "Outcome"])
+            names=["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI",
+                    "DiabetesPedigreeFunction", "Age", "Outcome"])
 X_d, y_d = diabetes.drop("Outcome", axis=1), diabetes["Outcome"]
 
 # Breast Cancer

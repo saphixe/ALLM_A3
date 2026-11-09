@@ -1,3 +1,4 @@
+from ollama import chat
 import pandas as pd
 import numpy as np
 import uuid
@@ -6,7 +7,7 @@ import joblib
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.datasets import load_breast_cancer
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, ConfusionMatrixDisplay, classification_report
 
 import json
 import re
@@ -16,12 +17,22 @@ warnings.filterwarnings("ignore")
 def call_llm_fn(prompt: str) -> str:
     # Replace with your actual OpenAI/LLM client call.
     # Must return raw text from the model. This is just a placeholder (that allows you to run the code).
+    response = chat(
+        model = "qwen3:4b-instruct",
+        messages = [{"role": "user", "content": prompt}],
+        format = "json"
+    )
+
+    return response.message.content
+
+
+    '''
     return """{
-  "routes": ["diabetes", "heart"],
-  "primary": "heart",
-  "confidence": {"diabetes": 0.35, "heart": 0.72, "breast_cancer": 0.05},
-  "notes": "Brief triage rationale."
-}"""
+    "routes": ["diabetes", "heart"],
+    "primary": "heart",
+    "confidence": {"diabetes": 0.35, "heart": 0.72, "breast_cancer": 0.05},
+    "notes": "Brief triage rationale." }""" 
+    ''' 
 
 
 def make_case_text(pid, d_row, b_row, h_row):
@@ -42,10 +53,10 @@ Breast features: mean radius={b_row[0]:.3f}, mean texture={b_row[1]:.3f}, mean p
 Output JSON only.
 Output format (example):
 {{
-  "routes": ["diabetes", "heart"],
-  "primary": "heart",
-  "confidence": {{"diabetes": 0.35, "heart": 0.72, "breast_cancer": 0.05}},
-  "notes": "Brief triage rationale."
+    "routes": ["diabetes", "heart"],
+    "primary": "heart",
+    "confidence": {{"diabetes": 0.35, "heart": 0.72, "breast_cancer": 0.05}},
+    "notes": "Brief triage rationale."
 }}
 """.strip()
 
@@ -105,17 +116,74 @@ class LLMPlannerAgent(BaseAgent):
             prompt = payload["text"]
 
             # Call LLM and parse response
+            try:
+                response = self.call_llm(prompt)
+                #print(f"\nQwen response for patient {pid}:")
+                #print(repr(response))
+                parsed = self._extract_json(response)
 
-            # store triage decision in model context
-            # self.model.triage_log.append({
-            #         "PatientID": pid,
-            #         "routes": routes,
-            #         "primary": primary_decision,
-            #         "labels": payload["labels"]
-            #     })
+                routes = parsed["routes"]
+                primary = parsed["primary"]
 
-            # Route to appropriate executors based on LLM decision
+                if not isinstance(routes, list):
+                    raise ValueError("'routes' must be a list")
 
+                if not isinstance(primary, str):
+                    raise ValueError("'primary' must be a string")
+
+            except (ValueError, KeyError, TypeError) as e:
+                print(f"[{self.role}] Failed to triage patient {pid}: {e}")
+                remaining.append(case) #try again if routes and primary are invalid
+                continue
+
+
+            valid_routes = []
+
+            for route in routes:
+                if route in ["diabetes", "breast_cancer", "heart"] and route not in valid_routes: #add route avoid duplicates
+                    valid_routes.append(route)
+
+            if not valid_routes: #if no valid route, record and continue
+                print(f"[{self.role}] No valid routes for patient {pid}")
+
+                self.model.triage_log.append({
+                    "PatientID": pid,
+                    "routes": [],
+                    "primary": None,
+                    "labels": payload["labels"]
+                })
+
+                continue
+
+            if primary in valid_routes:
+                primary_decision = primary
+            else:
+                primary_decision = valid_routes[0] #fallback if no valid primary
+
+            for valid_route in valid_routes:
+                task_id = f"task_{valid_route}_{pid}"
+                task = {
+                    "id": pid,
+                    "description": f"Analyze {valid_route} data",
+                    "data": payload["data"][valid_route],
+                    "y_true": payload["labels"][valid_route],
+                    "triage": {
+                        "routes": valid_routes,
+                        "primary": primary_decision,
+                        "labels": payload["labels"]
+                    }
+                }
+                self.model.context[task_id] = task
+
+            # store triage decision in model context for evaluation
+            self.model.triage_log.append({
+                "PatientID": pid,
+                "routes": valid_routes,
+                "primary": primary_decision,
+                "labels": payload["labels"]
+                })
+
+        # Route to appropriate executors based on LLM decision
         self.model.case_queue = remaining
 
 class PlannerAgent(BaseAgent):
@@ -228,19 +296,16 @@ class MCPMesaModel:
 # ==========================================
 
 # Diabetes
-diabetes = pd.read_csv("data/pima-indians-diabetes.data.csv",
-                       names=["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI",
-                              "DiabetesPedigreeFunction", "Age", "Outcome"])
-X_d, y_d = diabetes.drop("Outcome", axis=1), diabetes["Outcome"]
+diabetes = joblib.load("data/test/diabetes_test.pkl")
+X_d, y_d = diabetes["X"], diabetes["y"]
 
 # Breast Cancer
-breast = load_breast_cancer()
-X_b = pd.DataFrame(breast.data, columns=breast.feature_names)
-y_b = breast.target  # 0 = malignant, 1 = benign
+breast = joblib.load("data/test/breast_cancer_test.pkl")
+X_b, y_b = breast["X"], breast["y"]  # 0 = malignant, 1 = benign
 
 # Heart
-heart = pd.read_csv("data/heart.csv")
-X_h, y_h = heart.drop("target", axis=1), heart["target"]
+heart = joblib.load("data/test/heart_test.pkl")
+X_h, y_h = heart["X"], heart["y"]
 
 # load models from files
 clf_diabetes = joblib.load("model/diabetes.pkl")
@@ -254,21 +319,143 @@ for step in range(3):
     print(f"\n========== MESA STEP {step + 1} ==========")
     model.step()
 
+
 # ==========================================
 # STEP 5: Visualize Results with Seaborn
 # ==========================================
 
 # TODO: implement the analysis and visualization of results yourself. Below is just a starting point.
-
-results_df = pd.DataFrame(model.results)
-print("Results Collected:", len(results_df))
-print(results_df.head())
-
-
-
+diseases = ["diabetes", "breast_cancer", "heart"] 
 
 # Analyse the triage performance
 
 triage_df = pd.DataFrame(model.triage_log)
-print("Triage Collected:", len(triage_df))
-print(triage_df.head())
+
+print("\n========== LLM PLANNER EVALUATION ==========")
+
+if triage_df.empty:
+    print("No triage decisions available.")
+else:
+    true_pathways = []
+    predicted_pathways = []
+
+    for disease in diseases:
+
+        
+        #breast cancer uses 0 = malignant, 1 = benign.
+        if disease == "breast_cancer":
+            y_true = triage_df["labels"].apply(
+                lambda labels: int(labels[disease] == 0)
+            )
+        else:
+            y_true = triage_df["labels"].apply(
+                lambda labels: int(labels[disease] == 1) #otherwise if disease present
+            )
+
+        y_pred = triage_df["routes"].apply(
+            lambda routes: int(disease in routes)
+        )
+
+        true_pathways.append(y_true.to_numpy())
+        predicted_pathways.append(y_pred.to_numpy())
+
+        precision = precision_score(y_true, y_pred, zero_division=0)
+        recall = recall_score(y_true, y_pred, zero_division=0)
+        f1 = f1_score(y_true, y_pred, zero_division=0)
+
+        print(f"\n--- {disease.upper()} ---")
+        print(f"Precision: {precision:.3f}")
+        print(f"Recall:    {recall:.3f}")
+        print(f"F1-score:  {f1:.3f}")
+
+        cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+
+        disp = ConfusionMatrixDisplay(
+            confusion_matrix=cm,
+            display_labels=["Not selected", "Selected"]
+        )
+
+        disp.plot(cmap="Blues")
+        plt.title(f"LLM Planner - {disease}")
+        plt.xlabel("Predicted routing decision")
+        plt.ylabel("Reference disease status")
+        plt.show()
+
+    #combine the three binary pathway decisions
+    y_true_all = np.column_stack(true_pathways)
+    y_pred_all = np.column_stack(predicted_pathways)
+
+    print("\n========== OVERALL PLANNER METRICS ==========")
+
+    for average in ["micro", "macro"]:
+        precision = precision_score(
+            y_true_all, y_pred_all,
+            average=average, zero_division=0
+        )
+        recall = recall_score(
+            y_true_all, y_pred_all,
+            average=average, zero_division=0
+        )
+        f1 = f1_score(
+            y_true_all, y_pred_all,
+            average=average, zero_division=0
+        )
+
+        print(f"\n{average.upper()} AVERAGE")
+        print(f"Precision: {precision:.3f}")
+        print(f"Recall:    {recall:.3f}")
+        print(f"F1-score:  {f1:.3f}")
+
+#evaluating random forest executors
+
+results_df = pd.DataFrame(model.results)
+
+print("\n========== EXECUTOR EVALUATION ==========")
+
+for disease in diseases:
+
+    if results_df.empty:
+        print("No executor results available.")
+        break
+
+    disease_results = results_df[
+        results_df["Disease"] == disease
+    ]
+
+    if disease_results.empty:
+        print(f"\nNo executor predictions for {disease}")
+        continue
+
+    y_true = disease_results["y_true"]
+    y_pred = disease_results["y_pred"]
+
+    print(f"\n--- {disease.upper()} EXECUTOR ---")
+    print(f"Patients evaluated: {len(disease_results)}")
+    print(f"Accuracy: {accuracy_score(y_true, y_pred):.3f}")
+
+    print(classification_report(
+        y_true, y_pred,
+        labels=[0, 1],
+        zero_division=0
+    ))
+
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+
+    disp = ConfusionMatrixDisplay(
+        confusion_matrix=cm,
+        display_labels=["0", "1"]
+    )
+
+    disp.plot(cmap="Blues")
+    plt.title(f"Random Forest Executor - {disease}")
+    plt.xlabel("Predicted label")
+    plt.ylabel("True label")
+    plt.show()
+
+print("\n========== SIMULATION SUMMARY ==========")
+print(f"Patients triaged: {len(model.triage_log)}")
+print(f"Executor predictions: {len(model.results)}")
+print(f"Patients awaiting retry: {len(model.case_queue)}")
+
+
+
