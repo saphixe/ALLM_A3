@@ -370,15 +370,19 @@ else:
 
         cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
 
-        disp = ConfusionMatrixDisplay(
-            confusion_matrix=cm,
-            display_labels=["Not selected", "Selected"]
-        )
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm,
+            display_labels=["0", "1"])
 
         disp.plot(cmap="Blues")
-        plt.title(f"LLM Planner - {disease}")
+
+        plt.xticks([0, 1], ["Not selected", "Selected"])
+        plt.yticks([0, 1], ["Disease absent", "Disease present"])
+
         plt.xlabel("Predicted routing decision")
         plt.ylabel("Reference disease status")
+        plt.title(f"LLM Planner - {disease}")
+
+        plt.tight_layout()
         plt.show()
 
     #combine the three binary pathway decisions
@@ -441,10 +445,8 @@ for disease in diseases:
 
     cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
 
-    disp = ConfusionMatrixDisplay(
-        confusion_matrix=cm,
-        display_labels=["0", "1"]
-    )
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm,
+        display_labels=["0", "1"])
 
     disp.plot(cmap="Blues")
     plt.title(f"Random Forest Executor - {disease}")
