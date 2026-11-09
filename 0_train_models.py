@@ -19,8 +19,8 @@ os.makedirs("model", exist_ok=True)
 # Diabetes Model
 print("Training Diabetes Model...")
 diabetes = pd.read_csv("data/pima-indians-diabetes.data.csv",
-                       names=["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI",
-                              "DiabetesPedigreeFunction", "Age", "Outcome"])
+names=["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI",
+       "DiabetesPedigreeFunction", "Age", "Outcome"])
 X_d, y_d = diabetes.drop("Outcome", axis=1), diabetes["Outcome"]
 
 clf_diabetes = RandomForestClassifier().fit(X_d, y_d)
