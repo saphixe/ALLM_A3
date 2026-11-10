@@ -125,6 +125,7 @@ class LLMPlannerAgent(BaseAgent):
                 routes = parsed["routes"]
                 primary = parsed["primary"]
 
+                #handling invalid responses
                 if not isinstance(routes, list):
                     raise ValueError("'routes' must be a list")
 
@@ -325,6 +326,7 @@ for step in range(3):
 # ==========================================
 
 # TODO: implement the analysis and visualization of results yourself. Below is just a starting point.
+
 diseases = ["diabetes", "breast_cancer", "heart"] 
 
 # Analyse the triage performance
@@ -334,27 +336,25 @@ triage_df = pd.DataFrame(model.triage_log)
 print("\n========== LLM PLANNER EVALUATION ==========")
 
 if triage_df.empty:
-    print("No triage decisions available.")
+    print("No triage decisions were made.")
 else:
     true_pathways = []
     predicted_pathways = []
 
     for disease in diseases:
 
-        
         #breast cancer uses 0 = malignant, 1 = benign.
         if disease == "breast_cancer":
             y_true = triage_df["labels"].apply(
-                lambda labels: int(labels[disease] == 0)
-            )
+                lambda labels: int(labels[disease] == 0)) #int(true) malignant = 1, benign = 0
+            
         else:
             y_true = triage_df["labels"].apply(
-                lambda labels: int(labels[disease] == 1) #otherwise if disease present
-            )
+                lambda labels: int(labels[disease] == 1)) #else 1 means disease is present
+            
 
         y_pred = triage_df["routes"].apply(
-            lambda routes: int(disease in routes)
-        )
+            lambda routes: int(disease in routes))
 
         true_pathways.append(y_true.to_numpy())
         predicted_pathways.append(y_pred.to_numpy())
@@ -368,48 +368,6 @@ else:
         print(f"Recall:    {recall:.3f}")
         print(f"F1-score:  {f1:.3f}")
 
-        cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
-
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm,
-            display_labels=["0", "1"])
-
-        disp.plot(cmap="Blues")
-
-        plt.xticks([0, 1], ["Not selected", "Selected"])
-        plt.yticks([0, 1], ["Disease absent", "Disease present"])
-
-        plt.xlabel("Predicted routing decision")
-        plt.ylabel("Reference disease status")
-        plt.title(f"LLM Planner - {disease}")
-
-        plt.tight_layout()
-        plt.show()
-
-    #combine the three binary pathway decisions
-    y_true_all = np.column_stack(true_pathways)
-    y_pred_all = np.column_stack(predicted_pathways)
-
-    print("\n========== OVERALL PLANNER METRICS ==========")
-
-    for average in ["micro", "macro"]:
-        precision = precision_score(
-            y_true_all, y_pred_all,
-            average=average, zero_division=0
-        )
-        recall = recall_score(
-            y_true_all, y_pred_all,
-            average=average, zero_division=0
-        )
-        f1 = f1_score(
-            y_true_all, y_pred_all,
-            average=average, zero_division=0
-        )
-
-        print(f"\n{average.upper()} AVERAGE")
-        print(f"Precision: {precision:.3f}")
-        print(f"Recall:    {recall:.3f}")
-        print(f"F1-score:  {f1:.3f}")
-
 #evaluating random forest executors
 
 results_df = pd.DataFrame(model.results)
@@ -419,15 +377,13 @@ print("\n========== EXECUTOR EVALUATION ==========")
 for disease in diseases:
 
     if results_df.empty:
-        print("No executor results available.")
+        print("No executor results were made")
         break
 
-    disease_results = results_df[
-        results_df["Disease"] == disease
-    ]
+    disease_results = results_df[results_df["Disease"] == disease]
 
     if disease_results.empty:
-        print(f"\nNo executor predictions for {disease}")
+        print(f"\nNo executor predictions for {disease}") #if planner selected no patways for this disease
         continue
 
     y_true = disease_results["y_true"]
@@ -437,16 +393,11 @@ for disease in diseases:
     print(f"Patients evaluated: {len(disease_results)}")
     print(f"Accuracy: {accuracy_score(y_true, y_pred):.3f}")
 
-    print(classification_report(
-        y_true, y_pred,
-        labels=[0, 1],
-        zero_division=0
-    ))
+    print(classification_report(y_true, y_pred, labels=[0, 1], zero_division=0))
 
     cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
 
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm,
-        display_labels=["0", "1"])
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["0", "1"])
 
     disp.plot(cmap="Blues")
     plt.title(f"Random Forest Executor - {disease}")
